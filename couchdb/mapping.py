@@ -79,7 +79,7 @@ DEFAULT = object()
 
 class Field(object):
     """Basic unit for mapping a piece of data between Python and JSON.
-    
+
     Instances of this class can be added to subclasses of `Document` to describe
     the mapping of a document.
     """
@@ -191,7 +191,7 @@ class Mapping(MappingMetaClass):
 class ViewField(object):
     r"""Descriptor that can be used to bind a view definition to a property of
     a `Document` class.
-    
+
     >>> class Person(Document):
     ...     name = TextField()
     ...     age = IntegerField()
@@ -201,20 +201,20 @@ class ViewField(object):
     ...         }''')
     >>> Person.by_name
     <ViewDefinition '_design/people/_view/by_name'>
-    
+
     >>> print(Person.by_name.map_fun)
     function(doc) {
         emit(doc.name, doc);
     }
-    
+
     That property can be used as a function, which will execute the view.
-    
+
     >>> from couchdb import Database
     >>> db = Database('python-tests')
-    
+
     >>> Person.by_name(db, count=3)
     <ViewResults <PermanentView '_design/people/_view/by_name'> {'count': 3}>
-    
+
     The results produced by the view are automatically wrapped in the
     `Document` subclass the descriptor is bound to. In this example, it would
     return instances of the `Person` class. But please note that this requires
@@ -222,10 +222,10 @@ class ViewField(object):
     mapping defined by the containing `Document` class. Alternatively, the
     ``include_docs`` query option can be used to inline the actual documents in
     the view results, which will then be used instead of the values.
-    
+
     If you use Python view functions, this class can also be used as a
     decorator:
-    
+
     >>> class Person(Document):
     ...     name = TextField()
     ...     age = IntegerField()
@@ -233,19 +233,41 @@ class ViewField(object):
     ...     @ViewField.define('people')
     ...     def by_name(doc):
     ...         yield doc['name'], doc
-    
+
     >>> Person.by_name
     <ViewDefinition '_design/people/_view/by_name'>
 
     >>> print(Person.by_name.map_fun)
     def by_name(doc):
         yield doc['name'], doc
+
+    Alternatively, a map and reduce function can be used explicitly.  The results
+    with a reduce function will always return the actual documents rather than
+    the results mapped by the containing `Document` class.
+
+    >>> class Item(Document):
+    ...     sku = TextField()
+    ...     color = IntegerField()
+    ...
+    ...     stock = ViewField('people')
+    ...
+    ...     @stock.map
+    ...     def map(doc):
+    ...         yield doc['sku'], doc
+    ...
+    ...     @stock.reduce
+    ...     def reduce(keys, values, rereduce):
+    ...         if rereduce:
+    ...             yield sum(values)
+    ...         else:
+    ...             yield len(values)
+
     """
 
-    def __init__(self, design, map_fun, reduce_fun=None, name=None,
+    def __init__(self, design, map_fun=None, reduce_fun=None, name=None,
                  language='javascript', wrapper=DEFAULT, **defaults):
         """Initialize the view descriptor.
-        
+
         :param design: the name of the design document
         :param map_fun: the map function code
         :param reduce_fun: the reduce function code (optional)
@@ -271,8 +293,33 @@ class ViewField(object):
         view code).
         """
         def view_wrapped(fun):
-            return cls(design, fun, language=language, wrapper=wrapper,
-                       **defaults)
+            return cls(design, fun, name=name, language=language,
+                       wrapper=wrapper, **defaults)
+        return view_wrapped
+
+    @property
+    def map(self):
+        """Property method for use as a decorator to set a reduce function
+        """
+        if self.map_fun is not None:
+            raise AttributeError("ViewField already has a map function")
+
+        def view_wrapped(fun):
+            self.map_fun = fun
+            return self
+        return view_wrapped
+
+    @property
+    def reduce(self):
+        """Property method for use as a decorator to set a reduce function
+        """
+        if self.reduce_fun is not None:
+            raise AttributeError("ViewField already has a reduce function")
+
+        def view_wrapped(fun):
+            self.reduce_fun = fun
+            self.defaults['include_docs'] = True
+            return self
         return view_wrapped
 
     def __get__(self, instance, cls=None):
@@ -322,7 +369,7 @@ class Document(DocumentMetaClass, Mapping):
     @property
     def rev(self):
         """The document revision.
-        
+
         :rtype: basestring
         """
         if hasattr(self._data, 'rev'): # When data is client.Document
@@ -331,18 +378,18 @@ class Document(DocumentMetaClass, Mapping):
 
     def items(self):
         """Return the fields as a list of ``(name, value)`` tuples.
-        
+
         This method is provided to enable easy conversion to native dictionary
         objects, for example to allow use of `mapping.Document` instances with
         `client.Database.update`.
-        
+
         >>> class Post(Document):
         ...     title = TextField()
         ...     author = TextField()
         >>> post = Post(id='foo-bar', title='Foo bar', author='Joe')
         >>> sorted(post.items())
         [('_id', 'foo-bar'), ('author', u'Joe'), ('title', u'Foo bar')]
-        
+
         :return: a list of ``(name, value)`` tuples
         """
         retval = []
@@ -358,7 +405,7 @@ class Document(DocumentMetaClass, Mapping):
     @classmethod
     def load(cls, db, id):
         """Load a specific document from the given database.
-        
+
         :param db: the `Database` object to retrieve the document from
         :param id: the document ID
         :return: the `Document` instance, or `None` if no document with the
@@ -378,7 +425,7 @@ class Document(DocumentMetaClass, Mapping):
     def query(cls, db, map_fun, reduce_fun, language='javascript', **options):
         """Execute a CouchDB temporary view and map the result values back to
         objects of this mapping.
-        
+
         Note that by default, any properties of the document that are not
         included in the values of the view will be treated as if they were
         missing from the document. If you want to load the full document for
@@ -391,7 +438,7 @@ class Document(DocumentMetaClass, Mapping):
     def view(cls, db, viewname, **options):
         """Execute a CouchDB named view and map the result values back to
         objects of this mapping.
-        
+
         Note that by default, any properties of the document that are not
         included in the values of the view will be treated as if they were
         missing from the document. If you want to load the full document for
@@ -448,7 +495,7 @@ class DecimalField(Field):
 
 class DateField(Field):
     """Mapping field for storing dates.
-    
+
     >>> field = DateField()
     >>> field._to_python('2007-04-01')
     datetime.date(2007, 4, 1)
@@ -541,7 +588,7 @@ class TimeField(Field):
 
 class DictField(Field):
     """Field type for nested dictionaries.
-    
+
     >>> from couchdb import Server
     >>> server = Server()
     >>> db = server.create('python-tests')

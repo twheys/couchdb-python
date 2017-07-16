@@ -266,12 +266,73 @@ class WrappingTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
         self.assertEqual(type(results.rows[0]), self.Item)
 
 
+class WrappingDecoratorTestCase(testutil.TempDatabaseMixin, unittest.TestCase):
+    class Person(mapping.Document):
+        name = mapping.TextField()
+        age = mapping.IntegerField()
+
+        count_by_name = mapping.ViewField('people')
+
+        @count_by_name.map
+        def map(doc):
+            yield doc['name'], doc
+
+        @count_by_name.reduce
+        def reduce(keys, values, rereduce):
+            if rereduce:
+                yield sum(values)
+            else:
+                yield len(values)
+
+    def test_viewfield_is_viewfield(self):
+        self.assertIsInstance(self.Person.count_by_name, mapping.ViewDefinition)
+
+    def test_viewfield_has_map_func(self):
+        self.assertIsNotNone(self.Person.count_by_name.map_fun)
+
+    def test_get_map_func_source(self):
+        self.assertEqual(str(self.Person.count_by_name.map_fun),
+                         'def map(doc):\n'
+                         '    yield doc[\'name\'], doc')
+
+    def test_viewfield_has_reduce_func(self):
+        self.assertIsNotNone(self.Person.count_by_name.reduce_fun)
+
+    def test_get_reduce_func_source(self):
+        self.assertEqual(str(self.Person.count_by_name.reduce_fun),
+                         'def reduce(keys, values, rereduce):\n'
+                         '    if rereduce:\n'
+                         '        yield sum(values)\n'
+                         '    else:\n'
+                         '        yield len(values)')
+
+    def test_viewfield_defaults_include_docs_set_to_true(self):
+        self.assertTrue(self.Person.count_by_name.defaults['include_docs'])
+
+    def test_second_reduce_function_is_not_allowed(self):
+        with self.assertRaises(AttributeError):
+            class Person(mapping.Document):
+                @mapping.ViewField.define('people')
+                def by_name(doc):
+                    yield doc['name'], doc
+
+                @by_name.reduce
+                def by_name(keys, values, rereduce):
+                    yield values
+
+                # second reducer
+                @by_name.reduce
+                def by_name(keys, values, rereduce):
+                    yield values
+
+
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(testutil.doctest_suite(mapping))
     suite.addTest(unittest.makeSuite(DocumentTestCase, 'test'))
     suite.addTest(unittest.makeSuite(ListFieldTestCase, 'test'))
     suite.addTest(unittest.makeSuite(WrappingTestCase, 'test'))
+    suite.addTest(unittest.makeSuite(WrappingDecoratorTestCase, 'test'))
     return suite
 
 
